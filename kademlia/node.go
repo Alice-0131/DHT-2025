@@ -19,16 +19,20 @@ func init() {
 	logrus.SetOutput(f)
 }
 
-type Node struct {
-	Addr   string // address and port number of the node, e.g., "localhost:1234"
-	online bool
+const (
+	m     = 160
+	k     = 20
+	alpha = 3
+)
 
-	listener  net.Listener
-	server    *rpc.Server
-	data      map[string]string
-	dataLock  sync.RWMutex
-	peers     map[string]struct{} // we use map as a set
-	peersLock sync.RWMutex
+type Node struct {
+	Addr     string // address and port number of the node, e.g., "localhost:1234"
+	online   bool
+	listener net.Listener
+	server   *rpc.Server
+
+	data         Data
+	routingTable RoutingTable
 }
 
 // Pair is used to store a key-value pair.
@@ -43,8 +47,13 @@ type Pair struct {
 // Addr is the address and port number of the node, e.g., "localhost:1234".
 func (node *Node) Init(addr string) {
 	node.Addr = addr
-	node.data = make(map[string]string)
-	node.peers = make(map[string]struct{})
+	node.data.init()
+	node.routingTable.init()
+}
+
+func (node *Node) refresh() {
+	node.data.init()
+	node.routingTable.init()
 }
 
 func (node *Node) RunRPCServer(wg *sync.WaitGroup) {
@@ -96,8 +105,43 @@ func (node *Node) RemoteCall(addr string, method string, args interface{}, reply
 }
 
 //
+// Periodic Function
+//
+
+func (node *Node) maintain() {
+
+}
+
+func (node *Node) publish() {}
+
+//
 // RPC Methods
 //
+
+func (node *Node) Ping(_ string, reply *bool) error {
+	*reply = node.online
+	return nil
+}
+
+func (node *Node) Store() error {
+	return nil
+}
+
+func (node *Node) FindNode() error {
+	return nil
+}
+
+func (node *Node) FindValue() error {
+	return nil
+}
+
+//
+// Private methods
+//
+
+func (node *Node) node_lookup() {}
+
+func (node *Node) value_lookup() {}
 
 //
 // DHT methods
@@ -110,10 +154,14 @@ func (node *Node) Run(wg *sync.WaitGroup) {
 
 func (node *Node) Create() {
 	logrus.Info("Create")
+	node.refresh()
+	node.maintain()
 }
 
 func (node *Node) Join(addr string) bool {
-	logrus.Infof("Join %s", addr)
+	logrus.Infof("Join %s with %s", node.Addr, addr)
+	node.refresh()
+	node.maintain()
 	return true
 }
 
@@ -128,16 +176,23 @@ func (node *Node) Get(key string) (bool, string) {
 }
 
 func (node *Node) Delete(key string) bool {
-	logrus.Infof("Delete %s", key)
 	return true
 }
 
 func (node *Node) Quit() {
 	logrus.Infof("Quit %s", node.Addr)
+	if !node.online {
+		return
+	}
+	node.online = false
 	node.StopRPCServer()
 }
 
 func (node *Node) ForceQuit() {
-	logrus.Info("ForceQuit")
+	logrus.Infof("ForceQuit %s", node.Addr)
+	if !node.online {
+		return
+	}
+	node.online = false
 	node.StopRPCServer()
 }
