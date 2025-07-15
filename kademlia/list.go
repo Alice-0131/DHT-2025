@@ -3,8 +3,6 @@ package kademlia
 import (
 	"container/list"
 	"math/big"
-
-	"github.com/sirupsen/logrus"
 )
 
 type NodeInfo struct {
@@ -33,7 +31,8 @@ func (l *List) push(input []string) bool {
 		dis := Xor(id(key), l.keyID)
 		for e := l.data.Front(); e != nil; e = e.Next() {
 			dis_tmp := Xor(l.keyID, id(e.Value.(string)))
-			if dis == dis_tmp {
+			if dis.Cmp(dis_tmp) == 0 {
+				//logrus.Info("equal")
 				change = 1
 				break
 			}
@@ -56,9 +55,9 @@ func (l *List) push(input []string) bool {
 			}
 		}
 	}
-	for e := l.data.Front(); e != nil; e = e.Next() {
-		logrus.Info(e.Value.(string))
-	}
+	// for e := l.data.Front(); e != nil; e = e.Next() {
+	// 	logrus.Info(e.Value.(string))
+	// }
 	return flag
 }
 

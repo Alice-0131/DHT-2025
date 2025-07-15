@@ -23,9 +23,6 @@ const (
 	m     = 32
 	k     = 8
 	alpha = 2
-
-	//republishTime time.Duration = 1 * time.Hour
-	refreshTime time.Duration = 30 * time.Second
 )
 
 type Node struct {
@@ -111,15 +108,6 @@ func (node *Node) RemoteCall(addr string, method string, args interface{}, reply
 // Periodic Function
 //
 
-func (node *Node) maintain() {
-	go func() {
-		for node.online {
-			node.refresh()
-			time.Sleep(refreshTime)
-		}
-	}()
-}
-
 func (node *Node) republish() {
 	list := node.data.republishList()
 	var wg sync.WaitGroup
@@ -132,9 +120,6 @@ func (node *Node) republish() {
 		}()
 	}
 	wg.Wait()
-}
-
-func (node *Node) refresh() {
 }
 
 //
@@ -260,7 +245,7 @@ func (node *Node) valueLookup(key string) (bool, string) {
 		for i := 0; i < len(ret.List); i++ {
 			var tmp Ret
 			if err := node.RemoteCall(ret.List[i], "Node.FindValue", key, &tmp); err != nil {
-				logrus.Error("find_node in node_lookup error: ", err)
+				logrus.Error("find_node in value_lookup error: ", err)
 				return false, ""
 			}
 			node.routingTable.update(ret.List[i])
@@ -278,7 +263,7 @@ func (node *Node) valueLookup(key string) (bool, string) {
 			for i := 0; i < len(ret.List); i++ {
 				var tmp Ret
 				if err := node.RemoteCall(ret.List[i], "Node.FindValue", key, &tmp); err != nil {
-					logrus.Error("find_node in node_lookup error: ", err)
+					logrus.Error("find_node in value_lookup error: ", err)
 					return false, ""
 				}
 				node.routingTable.update(ret.List[i])
@@ -333,7 +318,6 @@ func (node *Node) Create() {
 	logrus.Info("Create")
 	node.Init(node.Addr)
 	node.routingTable.init(node)
-	node.maintain()
 }
 
 func (node *Node) Join(addr string) bool {
@@ -346,7 +330,6 @@ func (node *Node) Join(addr string) bool {
 		return false
 	}
 	node.nodeLookup(node.Addr)
-	node.maintain()
 	return true
 }
 
