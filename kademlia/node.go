@@ -20,9 +20,12 @@ func init() {
 }
 
 const (
-	m     = 160
-	k     = 20
-	alpha = 3
+	m     = 32
+	k     = 8
+	alpha = 2
+
+	//republishTime time.Duration = 1 * time.Hour
+	refreshTime time.Duration = 30 * time.Second
 )
 
 type Node struct {
@@ -31,7 +34,7 @@ type Node struct {
 	listener net.Listener
 	server   *rpc.Server
 
-	data         Data
+	data         DataBase
 	routingTable RoutingTable
 }
 
@@ -43,17 +46,17 @@ type Pair struct {
 	Value string
 }
 
+type Ret struct {
+	List  []string
+	Flag  bool
+	Value string
+}
+
 // Initialize a node.
 // Addr is the address and port number of the node, e.g., "localhost:1234".
 func (node *Node) Init(addr string) {
 	node.Addr = addr
 	node.data.init()
-	node.routingTable.init()
-}
-
-func (node *Node) refresh() {
-	node.data.init()
-	node.routingTable.init()
 }
 
 func (node *Node) RunRPCServer(wg *sync.WaitGroup) {
@@ -109,10 +112,30 @@ func (node *Node) RemoteCall(addr string, method string, args interface{}, reply
 //
 
 func (node *Node) maintain() {
-
+	go func() {
+		for node.online {
+			node.refresh()
+			time.Sleep(refreshTime)
+		}
+	}()
 }
 
-func (node *Node) publish() {}
+func (node *Node) republish() {
+	list := node.data.republishList()
+	var wg sync.WaitGroup
+	for _, p := range list {
+		wg.Add(1)
+		pair := p
+		go func() {
+			defer wg.Done()
+			node.publish(pair)
+		}()
+	}
+	wg.Wait()
+}
+
+func (node *Node) refresh() {
+}
 
 //
 // RPC Methods
@@ -123,15 +146,33 @@ func (node *Node) Ping(_ string, reply *bool) error {
 	return nil
 }
 
-func (node *Node) Store() error {
+func (node *Node) Store(pair Pair, _ *struct{}) error {
+	node.data.put(pair)
 	return nil
 }
 
-func (node *Node) FindNode() error {
+func (node *Node) FindNode(key string, reply *[]string) error {
+	d := Xor(id(key), id(node.Addr))
+	i := no(d)
+	*reply = node.routingTable.find_node(i)
+	logrus.Infof("%s findnode %s: %v", node.Addr, key, *reply)
 	return nil
 }
 
-func (node *Node) FindValue() error {
+func (node *Node) FindValue(key string, reply *Ret) error {
+	ok, v := node.data.get(key)
+	if ok {
+		*reply = Ret{[]string{}, true, v}
+		return nil
+	}
+	d := Xor(id(key), id(node.Addr))
+	i := no(d)
+	*reply = Ret{node.routingTable.find_node(i), false, ""}
+	return nil
+}
+
+func (node *Node) Update(addr string, _ *struct{}) error {
+	node.routingTable.update(addr)
 	return nil
 }
 
@@ -139,9 +180,145 @@ func (node *Node) FindValue() error {
 // Private methods
 //
 
-func (node *Node) node_lookup() {}
+func (node *Node) nodeLookup(key string) []string {
+	var list []string
+	var res List
+	var wg sync.WaitGroup
+	res.init(id(key))
+	node.FindNode(key, &list)
+	res.push(list)
+	for {
+		var flag bool = true
+		var flagLock sync.RWMutex
+		list = res.getAlphaList()
+		for i := 0; i < len(list); i++ { // try to call alpha uncalled node
+			wg.Add(1)
+			l := list[i]
+			go func() {
+				defer wg.Done()
+				var tmp []string
+				if err := node.RemoteCall(l, "Node.FindNode", key, &tmp); err != nil {
+					logrus.Error("find_node in node_lookup error: ", err)
+					return
+				}
+				node.routingTable.update(l)
+				if err := node.RemoteCall(l, "Node.Update", node.Addr, nil); err != nil {
+					logrus.Error("update in node_lookup error: ", err)
+					return
+				}
+				flagLock.Lock()
+				flag = res.push(tmp) && flag
+				flagLock.Unlock()
+			}()
+		}
+		wg.Wait()
+		if flag { // try to call all uncalled node
+			list = res.getUncalledList()
+			for i := 0; i < len(list); i++ {
+				wg.Add(1)
+				l := list[i]
+				go func() {
+					defer wg.Done()
+					var tmp []string
+					if err := node.RemoteCall(l, "Node.FindNode", key, &tmp); err != nil {
+						logrus.Error("find_node in node_lookup error: ", err)
+						return
+					}
+					node.routingTable.update(l)
+					if err := node.RemoteCall(l, "Node.Update", node.Addr, nil); err != nil {
+						logrus.Error("update in node_lookup error: ", err)
+						return
+					}
+					flagLock.Lock()
+					flag = res.push(tmp) && flag
+					flagLock.Unlock()
+				}()
+			}
+			wg.Wait()
+			if flag {
+				break
+			}
+		}
+	}
+	li := res.getAllList()
+	logrus.Infof("%s nodelookup %s: %v", node.Addr, key, li)
+	return li
+}
 
-func (node *Node) value_lookup() {}
+func (node *Node) valueLookup(key string) (bool, string) {
+	var ret Ret
+	var res List
+	res.init(id(key))
+	node.FindValue(key, &ret)
+	if ret.Flag {
+		return true, ret.Value
+	}
+	res.push(ret.List)
+	for {
+		var flag bool = true
+		ret.List = res.getAlphaList() // try to call alpha uncalled node
+		for i := 0; i < len(ret.List); i++ {
+			var tmp Ret
+			if err := node.RemoteCall(ret.List[i], "Node.FindValue", key, &tmp); err != nil {
+				logrus.Error("find_node in node_lookup error: ", err)
+				return false, ""
+			}
+			node.routingTable.update(ret.List[i])
+			if err := node.RemoteCall(ret.List[i], "Node.Update", node.Addr, nil); err != nil {
+				logrus.Error("update in value_lookup error: ", err)
+				return false, ""
+			}
+			if tmp.Flag {
+				return true, tmp.Value
+			}
+			flag = res.push(tmp.List) && flag
+		}
+		if flag {
+			ret.List = res.getUncalledList() // try to call all uncalled node
+			for i := 0; i < len(ret.List); i++ {
+				var tmp Ret
+				if err := node.RemoteCall(ret.List[i], "Node.FindValue", key, &tmp); err != nil {
+					logrus.Error("find_node in node_lookup error: ", err)
+					return false, ""
+				}
+				node.routingTable.update(ret.List[i])
+				if err := node.RemoteCall(ret.List[i], "Node.Update", node.Addr, nil); err != nil {
+					logrus.Error("update in value_lookup error: ", err)
+					return false, ""
+				}
+				if tmp.Flag {
+					return true, tmp.Value
+				}
+				flag = res.push(tmp.List) && flag
+			}
+			if flag {
+				return false, ""
+			}
+		}
+	}
+}
+
+func (node *Node) publish(pair Pair) {
+	list := node.nodeLookup(pair.Key)
+	var wg sync.WaitGroup
+	for i := 0; i < len(list); i++ {
+		wg.Add(1)
+		l := list[i]
+		go func() {
+			defer wg.Done()
+			if err := node.RemoteCall(l, "Node.Store", pair, nil); err != nil {
+				logrus.Error("store in publish error: ", err)
+				return
+			}
+			node.routingTable.update(l)
+			if err := node.RemoteCall(l, "Node.Update", node.Addr, nil); err != nil {
+				logrus.Error("update in publish error: ", err)
+				return
+			}
+		}()
+	}
+	wg.Wait()
+}
 
 //
 // DHT methods
@@ -154,25 +331,35 @@ func (node *Node) Run(wg *sync.WaitGroup) {
 
 func (node *Node) Create() {
 	logrus.Info("Create")
-	node.refresh()
+	node.Init(node.Addr)
+	node.routingTable.init(node)
 	node.maintain()
 }
 
 func (node *Node) Join(addr string) bool {
 	logrus.Infof("Join %s with %s", node.Addr, addr)
-	node.refresh()
+	node.Init(node.Addr)
+	node.routingTable.init(node)
+	node.routingTable.update(addr)
+	if err := node.RemoteCall(addr, "Node.Update", node.Addr, nil); err != nil {
+		logrus.Error("update in value_lookup error: ", err)
+		return false
+	}
+	node.nodeLookup(node.Addr)
 	node.maintain()
 	return true
 }
 
 func (node *Node) Put(key string, value string) bool {
 	logrus.Infof("Put %s %s", key, value)
+	node.publish(Pair{key, value})
 	return true
 }
 
 func (node *Node) Get(key string) (bool, string) {
 	logrus.Infof("Get %s", key)
-	return true, ""
+	ok, value := node.valueLookup(key)
+	return ok, value
 }
 
 func (node *Node) Delete(key string) bool {
@@ -184,6 +371,7 @@ func (node *Node) Quit() {
 	if !node.online {
 		return
 	}
+	node.republish()
 	node.online = false
 	node.StopRPCServer()
 }
