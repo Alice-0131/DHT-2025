@@ -2,21 +2,16 @@ package kademlia
 
 import (
 	"sync"
-	//"time"
 )
 
 type DataBase struct {
-	data map[string]string
-	//republishTime map[string]time.Time
-	//expireTime    map[string]time.Time
+	data     map[string]string
 	dataLock sync.RWMutex
 }
 
 func (dataBase *DataBase) init() {
 	dataBase.dataLock.Lock()
 	dataBase.data = make(map[string]string)
-	//dataBase.republishTime = make(map[string]time.Time)
-	//dataBase.expireTime = make(map[string]time.Time)
 	dataBase.dataLock.Unlock()
 }
 
@@ -42,5 +37,3 @@ func (dataBase *DataBase) republishList() []Pair {
 	dataBase.dataLock.Unlock()
 	return list
 }
-
-//func (dataBase *DataBase) expire() {}

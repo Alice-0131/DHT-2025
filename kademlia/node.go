@@ -21,7 +21,7 @@ func init() {
 
 const (
 	m     = 32
-	k     = 8
+	k     = 10
 	alpha = 2
 )
 
@@ -63,12 +63,12 @@ func (node *Node) RunRPCServer(wg *sync.WaitGroup) {
 	node.listener, err = net.Listen("tcp", node.Addr)
 	wg.Done()
 	if err != nil {
-		logrus.Fatal("listen error: ", err)
+		//logrus.Fatal("listen error: ", err)
 	}
 	for node.online {
 		conn, err := node.listener.Accept()
 		if err != nil {
-			logrus.Error("accept error: ", err)
+			//logrus.Error("accept error: ", err)
 			return
 		}
 		go node.server.ServeConn(conn)
@@ -86,19 +86,19 @@ func (node *Node) StopRPCServer() {
 // Re-connect to the client every time can be slow. You can use connection pool to improve the performance.
 func (node *Node) RemoteCall(addr string, method string, args interface{}, reply interface{}) error {
 	if method != "Node.Ping" {
-		logrus.Infof("[%s] RemoteCall %s %s %v", node.Addr, addr, method, args)
+		//logrus.Infof("[%s] RemoteCall %s %s %v", node.Addr, addr, method, args)
 	}
-	// Note: Here we use DialTimeout to set a timeout of 10 seconds.
-	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	// Note: Here we use DialTimeout to set a timeout of 1 seconds.
+	conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
 	if err != nil {
-		logrus.Error("dialing: ", err)
+		//logrus.Error("dialing: ", err)
 		return err
 	}
 	client := rpc.NewClient(conn)
 	defer client.Close()
 	err = client.Call(method, args, reply)
 	if err != nil {
-		logrus.Error("RemoteCall error: ", err)
+		//logrus.Error("RemoteCall error: ", err)
 		return err
 	}
 	return nil
@@ -140,7 +140,7 @@ func (node *Node) FindNode(key string, reply *[]string) error {
 	d := Xor(id(key), id(node.Addr))
 	i := no(d)
 	*reply = node.routingTable.find_node(i)
-	logrus.Infof("%s findnode %s: %v", node.Addr, key, *reply)
+	//logrus.Infof("%s findnode %s: %v", node.Addr, key, *reply)
 	return nil
 }
 
@@ -169,7 +169,7 @@ func (node *Node) nodeLookup(key string) []string {
 	var list []string
 	var res List
 	var wg sync.WaitGroup
-	res.init(id(key))
+	res.init(id(key), node)
 	node.FindNode(key, &list)
 	res.push(list)
 	for {
@@ -177,18 +177,18 @@ func (node *Node) nodeLookup(key string) []string {
 		var flagLock sync.RWMutex
 		list = res.getAlphaList()
 		for i := 0; i < len(list); i++ { // try to call alpha uncalled node
-			wg.Add(1)
 			l := list[i]
+			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				var tmp []string
 				if err := node.RemoteCall(l, "Node.FindNode", key, &tmp); err != nil {
-					logrus.Error("find_node in node_lookup error: ", err)
+					//logrus.Error("find_node in node_lookup error: ", err)
 					return
 				}
 				node.routingTable.update(l)
 				if err := node.RemoteCall(l, "Node.Update", node.Addr, nil); err != nil {
-					logrus.Error("update in node_lookup error: ", err)
+					//logrus.Error("update in node_lookup error: ", err)
 					return
 				}
 				flagLock.Lock()
@@ -200,18 +200,18 @@ func (node *Node) nodeLookup(key string) []string {
 		if flag { // try to call all uncalled node
 			list = res.getUncalledList()
 			for i := 0; i < len(list); i++ {
-				wg.Add(1)
 				l := list[i]
+				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					var tmp []string
 					if err := node.RemoteCall(l, "Node.FindNode", key, &tmp); err != nil {
-						logrus.Error("find_node in node_lookup error: ", err)
+						//logrus.Error("find_node in node_lookup error: ", err)
 						return
 					}
 					node.routingTable.update(l)
 					if err := node.RemoteCall(l, "Node.Update", node.Addr, nil); err != nil {
-						logrus.Error("update in node_lookup error: ", err)
+						//logrus.Error("update in node_lookup error: ", err)
 						return
 					}
 					flagLock.Lock()
@@ -226,14 +226,14 @@ func (node *Node) nodeLookup(key string) []string {
 		}
 	}
 	li := res.getAllList()
-	logrus.Infof("%s nodelookup %s: %v", node.Addr, key, li)
+	//logrus.Infof("%s nodelookup %s: %v", node.Addr, key, li)
 	return li
 }
 
 func (node *Node) valueLookup(key string) (bool, string) {
 	var ret Ret
 	var res List
-	res.init(id(key))
+	res.init(id(key), node)
 	node.FindValue(key, &ret)
 	if ret.Flag {
 		return true, ret.Value
@@ -245,12 +245,12 @@ func (node *Node) valueLookup(key string) (bool, string) {
 		for i := 0; i < len(ret.List); i++ {
 			var tmp Ret
 			if err := node.RemoteCall(ret.List[i], "Node.FindValue", key, &tmp); err != nil {
-				logrus.Error("find_node in value_lookup error: ", err)
+				//logrus.Error("find_node in value_lookup error: ", err)
 				return false, ""
 			}
 			node.routingTable.update(ret.List[i])
 			if err := node.RemoteCall(ret.List[i], "Node.Update", node.Addr, nil); err != nil {
-				logrus.Error("update in value_lookup error: ", err)
+				//logrus.Error("update in value_lookup error: ", err)
 				return false, ""
 			}
 			if tmp.Flag {
@@ -263,12 +263,12 @@ func (node *Node) valueLookup(key string) (bool, string) {
 			for i := 0; i < len(ret.List); i++ {
 				var tmp Ret
 				if err := node.RemoteCall(ret.List[i], "Node.FindValue", key, &tmp); err != nil {
-					logrus.Error("find_node in value_lookup error: ", err)
+					//logrus.Error("find_node in value_lookup error: ", err)
 					return false, ""
 				}
 				node.routingTable.update(ret.List[i])
 				if err := node.RemoteCall(ret.List[i], "Node.Update", node.Addr, nil); err != nil {
-					logrus.Error("update in value_lookup error: ", err)
+					//logrus.Error("update in value_lookup error: ", err)
 					return false, ""
 				}
 				if tmp.Flag {
@@ -292,12 +292,12 @@ func (node *Node) publish(pair Pair) {
 		go func() {
 			defer wg.Done()
 			if err := node.RemoteCall(l, "Node.Store", pair, nil); err != nil {
-				logrus.Error("store in publish error: ", err)
+				//logrus.Error("store in publish error: ", err)
 				return
 			}
 			node.routingTable.update(l)
 			if err := node.RemoteCall(l, "Node.Update", node.Addr, nil); err != nil {
-				logrus.Error("update in publish error: ", err)
+				//logrus.Error("update in publish error: ", err)
 				return
 			}
 		}()

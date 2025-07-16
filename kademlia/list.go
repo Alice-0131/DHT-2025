@@ -5,18 +5,14 @@ import (
 	"math/big"
 )
 
-type NodeInfo struct {
-	Addr string
-	Dis  *big.Int
-}
-
 type List struct {
+	node   *Node
 	keyID  *big.Int
 	data   *list.List
 	called map[string]struct{}
 }
 
-func (l *List) init(k *big.Int) {
+func (l *List) init(k *big.Int, node *Node) {
 	l.keyID = k
 	l.data = list.New()
 	l.called = make(map[string]struct{})
@@ -32,7 +28,6 @@ func (l *List) push(input []string) bool {
 		for e := l.data.Front(); e != nil; e = e.Next() {
 			dis_tmp := Xor(l.keyID, id(e.Value.(string)))
 			if dis.Cmp(dis_tmp) == 0 {
-				//logrus.Info("equal")
 				change = 1
 				break
 			}
@@ -43,6 +38,13 @@ func (l *List) push(input []string) bool {
 			}
 		}
 		if change == 2 {
+			var online bool
+			if err := l.node.RemoteCall(key, "Node.Ping", "", &online); err != nil {
+				online = false
+			}
+			if !online {
+				continue
+			}
 			flag = false
 			l.data.InsertBefore(key, ele)
 			if l.data.Len() > k {
@@ -50,14 +52,18 @@ func (l *List) push(input []string) bool {
 			}
 		} else if change == 0 {
 			if l.data.Len() < k {
+				var online bool
+				if err := l.node.RemoteCall(key, "Node.Ping", "", &online); err != nil {
+					online = false
+				}
+				if !online {
+					continue
+				}
 				l.data.PushBack(key)
 				flag = false
 			}
 		}
 	}
-	// for e := l.data.Front(); e != nil; e = e.Next() {
-	// 	logrus.Info(e.Value.(string))
-	// }
 	return flag
 }
 

@@ -22,20 +22,6 @@ func id(s string) *big.Int {
 	return (&big.Int{}).SetBytes(hash.Sum(nil))
 }
 
-// flag == true:(); flag == false:(]
-func in_range(l, r, k *big.Int, flag bool) bool {
-	if l.Cmp(r) > 0 {
-		if k.Cmp(l) > 0 || k.Cmp(r) < 0 || !flag && k.Cmp(r) == 0 {
-			return true
-		}
-	} else {
-		if k.Cmp(l) > 0 && (flag && k.Cmp(r) < 0 || !flag && k.Cmp(r) <= 0) {
-			return true
-		}
-	}
-	return false
-}
-
 func Xor(a, b *big.Int) *big.Int {
 	return new(big.Int).Xor(a, b)
 }
