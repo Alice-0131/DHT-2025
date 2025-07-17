@@ -79,7 +79,7 @@ func (node *Node) ForceQuit()
 
 In this protocol, the system can automatically update predecessor and successor by running `stabilize` periodically as long as the inserted node's successor is correct. To ensure this, I should constantly update every node's successor.
 
-`fingerTable` can enhance the efficiency of finding nodes, which allows the time comlexity of DHT methods is $O(n)$. `fix_fingers` will fix the finger table periodically to ensure its correctness.
+`fingerTable` can enhance the efficiency of finding nodes, which allows the time comlexity of DHT methods is $O(log n)$. `fix_fingers` will fix the finger table periodically to ensure its correctness.
 
 Moreover, if a node suddenly fails, the ring will break. To prevent this horrible situation, every node records its successor list. Then if a node's successor fails, it can instantly know its next successor.
 
